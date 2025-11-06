@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldPoints Online</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;font-family:'Inter',sans-serif;margin:0;padding:0;}
+body, html{height:100%;margin:0;}
+body{display:flex;flex-direction:column;}
+#loginPage{position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,#0ea5a4,#3b82f6);display:flex;justify-content:center;align-items:center;z-index:10;}
+#loginBox{background:#fff;padding:50px 30px;border-radius:20px;box-shadow:0 10px 25px rgba(0,0,0,0.3);width:350px;text-align:center;}
+#loginBox h1{margin-bottom:25px;color:#0ea5a4;font-size:28px;}
+#loginBox input{width:100%;padding:12px;margin-bottom:15px;border-radius:10px;border:1px solid #ccc;font-size:16px;}
+#loginBox button{width:100%;padding:12px;background:#0ea5a4;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;transition:all 0.2s;}
+#loginBox button:hover{background:#059fa2;}
+#loginBox .switch{margin-top:10px;color:#0ea5a4;cursor:pointer;text-decoration:underline;}
+#container{display:flex;flex:1;height:100vh;}
+#map{flex:2;height:100%;}
+#sidebar{flex:1;max-width:400px;background:#f7f7f7;overflow:auto;display:flex;flex-direction:column;padding:20px;}
+#sidebar h2{margin-bottom:15px;color:#0ea5a4;font-size:20px;}
+#pointForm textarea{width:100%;padding:10px;border-radius:10px;border:1px solid #ccc;margin-bottom:10px;font-size:14px;resize:none;}
+#pointForm button{padding:10px 15px;background:#0ea5a4;color:#fff;border:none;border-radius:10px;cursor:pointer;font-weight:600;}
+#pointForm button:hover{background:#059fa2;}
+.filter-buttons{display:flex;gap:5px;margin-bottom:15px;}
+.filter-buttons button{flex:1;padding:8px 0;background:#e0e0e0;border:none;border-radius:8px;cursor:pointer;font-weight:600;}
+.filter-buttons button.active{background:#0ea5a4;color:#fff;}
+.point-item{background:#fff;padding:10px;margin-bottom:10px;border-radius:10px;box-shadow:0 3px 6px rgba(0,0,0,0.05);}
+.point-item strong{color:#0ea5a4;}
+</style>
+</head>
+<body>
+
+<div id="loginPage">
+  <div id="loginBox">
+    <h1>WorldPoints</h1>
+    <input type="text" id="pseudo" placeholder="Pseudo">
+    <input type="password" id="password" placeholder="Mot de passe">
+    <button id="loginBtn">Se connecter</button>
+    <div class="switch" id="switchBtn">S'inscrire</div>
+  </div>
+</div>
+
+<div id="container" style="display:none;">
+  <div id="map"></div>
+  <div id="sidebar">
+    <h2>Ajouter un point</h2>
+    <div id="pointForm">
+      <textarea id="messageInput" rows="3" placeholder="Votre message..."></textarea>
+      <button id="addPointBtn">Ajouter le point</button>
+    </div>
+    <div class="filter-buttons">
+      <button id="filterAll" class="active">Tous les points</button>
+      <button id="filterMine">Mes points</button>
+      <button id="sortLikes">Trier par likes</button>
+    </div>
+    <div id="pointsList"></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.27.0/firebase-app.js";
+import { getFirestore, collection, addDoc, getDoc, setDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/11.27.0/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyB3H1EdMeIghCsYsCst5A-z-7ldCkEHgc4",
+    authDomain: "worldpoints-5b0c5.firebaseapp.com",
+    projectId: "worldpoints-5b0c5",
+    storageBucket: "worldpoints-5b0c5.firebasestorage.app",
+    messagingSenderId: "392603551727",
+    appId: "1:392603551727:web:4a4fac9095bb6e1e53581a",
+    measurementId: "G-2QS4CF3521"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+let user = null;
+const loginPage = document.getElementById('loginPage');
+const container = document.getElementById('container');
+const pseudoInput = document.getElementById('pseudo');
+const passwordInput = document.getElementById('password');
+const loginBtn = document.getElementById('loginBtn');
+const switchBtn = document.getElementById('switchBtn');
+let signupMode = false;
+
+switchBtn.addEventListener('click', ()=>{
+  signupMode = !signupMode;
+  switchBtn.textContent = signupMode ? "Se connecter" : "S'inscrire";
+  loginBtn.textContent = signupMode ? "S'inscrire" : "Se connecter";
+});
+
+loginBtn.addEventListener('click', async ()=>{
+  const pseudo = pseudoInput.value.trim();
+  const mdp = passwordInput.value.trim();
+  if(!pseudo || !mdp){ alert('Remplis tous les champs !'); return; }
+
+  const userRef = doc(db,'users',pseudo);
+  const userSnap = await getDoc(userRef);
+
+  if(signupMode){
+    if(userSnap.exists()){ alert('Pseudo déjà pris'); return; }
+    await setDoc(userRef,{password:mdp});
+    user={pseudo};
+    loginPage.style.display='none';
+    container.style.display='flex';
+    alert('Inscription réussie !');
+  } else {
+    if(!userSnap.exists()){ alert('Pseudo non trouvé'); return; }
+    if(userSnap.data().password !== mdp){ alert('Mot de passe incorrect'); return; }
+    user={pseudo};
+    loginPage.style.display='none';
+    container.style.display='flex';
+  }
+});
+
+// ===== MAP =====
+const map = L.map('map').setView([20,0],2);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+let selectedPos=null;
+let tempMarker=null;
+map.on('click', e => { selectedPos = e.latlng; if(tempMarker) map.removeLayer(tempMarker); tempMarker=L.marker(selectedPos).addTo(map); });
+
+// ===== POINTS =====
+const addPointBtn = document.getElementById('addPointBtn');
+const messageInput = document.getElementById('messageInput');
+const pointsList = document.getElementById('pointsList');
+let points = [];
+let creations = {};
+
+addPointBtn.addEventListener('click', async ()=>{
+  if(!user || !selectedPos){ alert('Clique sur la carte !'); return; }
+  const msg = messageInput.value.trim(); if(!msg){ alert('Message vide !'); return; }
+  const now = Date.now(); creations[user.pseudo]=creations[user.pseudo]||[]; creations[user.pseudo]=creations[user.pseudo].filter(t=>t>now-3600*1000);
+  if(creations[user.pseudo] && creations[user.pseudo].length>=5){ alert('Quota 5 points/h atteint'); return; }
+  creations[user.pseudo].push(now);
+  await addDoc(collection(db,'points'),{lat:selectedPos.lat,lng:selectedPos.lng,text:msg,author:user.pseudo,createdAt:now,likes:{}});
+  messageInput.value=''; renderPoints();
+});
+
+async function renderPoints(){ 
+  pointsList.innerHTML='';
+  points=[];
+  const snapshot = await getDocs(collection(db,'points'));
+  snapshot.forEach(docSnap => points.push(docSnap.data()));
+  points.slice().reverse().forEach(p => {
+    const div = document.createElement('div'); div.className='point-item';
+    div.innerHTML=`<strong>${p.author}</strong> (${new Date(p.createdAt).toLocaleString()})<br>${p.text}`;
+    pointsList.appendChild(div);
+    const marker=L.marker([p.lat,p.lng]).addTo(map);
+    marker.bindPopup(`<strong>${p.author}</strong><br>${p.text}<br>${new Date(p.createdAt).toLocaleString()}`);
+  });
+}
+setInterval(renderPoints,3000);
+</script>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</body>
+</html>
